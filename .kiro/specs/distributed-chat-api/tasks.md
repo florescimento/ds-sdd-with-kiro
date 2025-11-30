@@ -1,0 +1,522 @@
+# Implementation Plan
+
+- [x] 1. Setup project structure and core infrastructure
+  - Create Go module structure with directories for services, models, and shared packages
+  - Setup Docker Compose for local development with Kafka, MongoDB, Redis, MinIO
+  - Create Makefile with common commands (build, test, run, docker-up)
+  - Initialize configuration management using environment variables and config files
+  - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
+
+- [ ] 2. Implement data models and shared packages
+  - [ ] 2.1 Create core domain models (User, Conversation, Message, FileMetadata)
+    - Define Go structs with JSON and BSON tags for API and database serialization
+    - Implement validation methods for each model
+    - _Requirements: 1.1, 1.2, 1.3, 3.1, 3.2, 3.3, 4.1, 4.2, 5.1, 5.2_
+  - [ ] 2.2 Implement shared utilities package
+    - Create UUID generation utility for message_id and other IDs
+    - Implement checksum calculation utilities (SHA256)
+    - Create time utilities for timestamp handling
+    - _Requirements: 4.2, 5.3_
+  - [ ] 2.3 Create error handling package
+    - Define standard error types and codes
+    - Implement error response formatting
+    - Create error wrapping utilities with trace context
+    - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5_
+
+- [ ] 3. Implement Auth Service
+  - [ ] 3.1 Create user registration endpoint
+    - Implement POST /v1/auth/register handler
+    - Validate username uniqueness against metadata store (etcd)
+    - Hash passwords using bcrypt with cost factor 12
+    - Store user profile in etcd
+    - _Requirements: 1.1, 1.2, 1.3_
+  - [ ] 3.2 Implement authentication and token generation
+    - Create POST /v1/auth/token endpoint
+    - Validate credentials against stored hash
+    - Generate JWT access token (1-hour expiration) and refresh token (30-day expiration)
+    - Return tokens in response
+    - _Requirements: 1.4, 8.3_
+  - [ ] 3.3 Create token validation middleware
+    - Implement JWT validation middleware for protected endpoints
+    - Extract username from token claims
+    - Handle token expiration and invalid tokens
+    - _Requirements: 1.4, 8.3_
+  - [ ] 3.4 Implement user-to-channel mapping management
+    - Create endpoints to add/update/remove channel mappings
+    - Store mappings in etcd under user profile
+    - Validate channel names against supported list
+    - _Requirements: 1.5, 14.1_
+  - [ ] 3.5 Write unit tests for Auth Service
+    - Test username uniqueness validation
+    - Test password hashing and verification
+    - Test JWT generation and validation
+    - Test channel mapping CRUD operations
+    - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5_
+
+- [ ] 4. Implement Metadata Store client (etcd)
+  - [ ] 4.1 Create etcd client wrapper
+    - Initialize etcd client with connection pooling
+    - Implement Put, Get, Delete operations with context
+    - Add error handling and retry logic
+    - _Requirements: 1.3, 9.3_
+  - [ ] 4.2 Implement user profile storage operations
+    - Create methods to store and retrieve user profiles
+    - Implement atomic username uniqueness check using etcd transactions
+    - Add methods for channel mapping updates
+    - _Requirements: 1.1, 1.2, 1.5_
+
+- [ ] 5. Implement Message Store client (MongoDB)
+  - [ ] 5.1 Create MongoDB client and connection management
+    - Initialize MongoDB client with replica set configuration
+    - Implement connection pooling and health checks
+    - Configure write concern (majority) and read preference (primaryPreferred)
+    - _Requirements: 11.3_
+  - [ ] 5.2 Implement Conversations repository
+    - Create methods to insert new conversations
+    - Implement query by conversation_id
+    - Add method to list conversations by username (member)
+    - Create indexes on conversation_id and members
+    - _Requirements: 3.1, 3.2, 3.3, 3.4_
+  - [ ] 5.3 Implement Messages repository
+    - Create method to insert messages with automatic sequence number generation
+    - Implement message deduplication check by message_id
+    - Add method to update message status and append to status_history
+    - Create method to query messages by conversation_id with pagination
+    - Implement indexes on message_id, conversation_id+sequence_number, from, to, created_at
+    - _Requirements: 4.1, 4.2, 4.3, 5.1, 5.2, 7.1, 7.2, 10.1, 10.2, 10.3_
+  - [ ] 5.4 Implement Files repository
+    - Create method to store file metadata
+    - Implement query by file_id
+    - Add method to update file status after upload completion
+    - _Requirements: 5.1, 5.2, 5.3, 5.4_
+  - [ ] 5.5 Write integration tests for MongoDB repositories
+    - Test conversation creation and queries
+    - Test message insertion with deduplication
+    - Test status updates and history tracking
+    - Test file metadata storage
+    - _Requirements: 3.1, 4.1, 5.1, 10.1_
+
+- [ ] 6. Implement Kafka client and event publishing
+  - [ ] 6.1 Create Kafka producer wrapper
+    - Initialize Kafka producer with configuration
+    - Implement publish method with partitioning by conversation_id
+    - Add error handling and retry logic
+    - Implement graceful shutdown
+    - _Requirements: 10.4_
+  - [ ] 6.2 Define event schemas
+    - Create MessageEvent struct for new messages
+    - Create StatusEvent struct for status updates
+    - Create FileEvent struct for file upload completions
+    - Create PresenceEvent struct for online/offline changes
+    - _Requirements: 4.1, 4.2, 6.1, 6.2, 7.1_
+  - [ ] 6.3 Create Kafka consumer wrapper
+    - Initialize Kafka consumer with consumer group configuration
+    - Implement consume loop with context cancellation
+    - Add offset commit logic
+    - Implement graceful shutdown
+    - _Requirements: 10.4_
+
+- [ ] 7. Implement Frontend Service
+  - [ ] 7.1 Setup HTTP server with routing
+    - Initialize HTTP server with graceful shutdown
+    - Setup router (e.g., gorilla/mux or chi)
+    - Add middleware: logging, tracing, authentication, CORS
+    - Implement health check endpoints (/health/live, /health/ready)
+    - _Requirements: 8.1, 8.2_
+  - [ ] 7.2 Implement conversation endpoints
+    - Create POST /v1/conversations handler
+    - Validate request payload (type, members)
+    - Generate conversation_id and persist to MongoDB
+    - Return conversation details
+    - _Requirements: 3.1, 3.2, 3.3_
+  - [ ] 7.3 Implement GET conversations endpoint
+    - Create GET /v1/conversations handler with username filter
+    - Query MongoDB for conversations where user is member
+    - Return paginated list of conversations
+    - _Requirements: 3.4_
+  - [ ] 7.4 Implement message send endpoint
+    - Create POST /v1/messages handler
+    - Validate payload (conversation_id, from, to, channels, payload)
+    - Generate or validate message_id (UUID)
+    - Publish MessageEvent to Kafka
+    - Return 202 Accepted with message_id
+    - _Requirements: 4.1, 4.2, 4.3, 4.4, 4.5_
+  - [ ] 7.5 Implement message status query endpoint
+    - Create GET /v1/messages/{message_id}/status handler
+    - Query MongoDB for message by message_id
+    - Return current status and status_history
+    - _Requirements: 6.4_
+  - [ ] 7.6 Implement webhook registration endpoints
+    - Create POST /v1/webhooks handler to register webhook URL
+    - Store webhook configuration in etcd
+    - Create DELETE /v1/webhooks/{webhook_id} handler
+    - _Requirements: 6.5, 8.5_
+  - [ ] 7.7 Implement GET messages by conversation endpoint
+    - Create GET /v1/conversations/{conversation_id}/messages handler
+    - Query MongoDB with pagination (since parameter)
+    - Return messages in order by sequence_number
+    - _Requirements: 8.2, 10.2_
+  - [ ] 7.8 Write unit tests for Frontend Service handlers
+    - Test conversation creation with valid and invalid payloads
+    - Test message send with validation
+    - Test status query endpoint
+    - Test webhook registration
+    - _Requirements: 3.1, 4.1, 6.4, 8.1_
+
+- [ ] 8. Implement Object Storage client (MinIO)
+  - [ ] 8.1 Create MinIO client wrapper
+    - Initialize MinIO client with credentials
+    - Implement bucket creation and validation
+    - Add error handling for storage operations
+    - _Requirements: 5.4_
+  - [ ] 8.2 Implement presigned URL generation
+    - Create method to generate presigned PUT URL for uploads
+    - Set expiration time (15 minutes)
+    - Return upload_url and file_id
+    - _Requirements: 5.1_
+  - [ ] 8.3 Implement multipart upload support
+    - Create method to initiate multipart upload
+    - Generate presigned URLs for each part
+    - Implement complete multipart upload
+    - _Requirements: 5.2_
+  - [ ] 8.4 Implement file retrieval
+    - Create method to generate presigned GET URL for downloads
+    - Set expiration time (1 hour)
+    - _Requirements: 5.4_
+
+- [ ] 9. Implement File Upload Service
+  - [ ] 9.1 Create file upload initiation endpoint
+    - Implement POST /v1/files/initiate handler
+    - Generate file_id (UUID)
+    - Call MinIO client to get presigned upload URL
+    - Store initial file metadata in MongoDB (status: uploading)
+    - Return upload_url and file_id
+    - _Requirements: 5.1_
+  - [ ] 9.2 Implement upload completion endpoint
+    - Create POST /v1/files/complete handler
+    - Validate checksum against uploaded file
+    - Update file metadata in MongoDB (status: completed)
+    - Publish FileEvent to Kafka
+    - Return file metadata
+    - _Requirements: 5.3, 5.4_
+  - [ ] 9.3 Implement file metadata query endpoint
+    - Create GET /v1/files/{file_id} handler
+    - Query MongoDB for file metadata
+    - Generate presigned download URL
+    - Return metadata with download URL
+    - _Requirements: 5.4_
+  - [ ] 9.4 Write unit tests for File Upload Service
+    - Test upload initiation
+    - Test checksum validation
+    - Test completion flow
+    - _Requirements: 5.1, 5.3_
+
+- [ ] 10. Implement Presence Service
+  - [ ] 10.1 Create Redis client wrapper
+    - Initialize Redis client with connection pooling
+    - Implement Set, Get, Delete operations
+    - Add TTL management for presence keys
+    - _Requirements: 2.1, 2.2_
+  - [ ] 10.2 Implement presence tracking methods
+    - Create SetOnline method to register user connection
+    - Create SetOffline method to remove connection
+    - Implement IsOnline query method
+    - Create GetPresence method to retrieve full presence info
+    - Use Redis keys with TTL (5 minutes) and heartbeat refresh
+    - _Requirements: 2.1, 2.2, 2.3_
+  - [ ] 10.3 Implement WebSocket connection handler
+    - Create WebSocket endpoint for client connections
+    - Handle connection establishment and authentication
+    - Register connection in Presence Service
+    - Implement heartbeat mechanism (ping/pong)
+    - Handle disconnection and cleanup
+    - _Requirements: 2.1, 2.2, 7.1_
+  - [ ] 10.4 Implement presence event publishing
+    - Publish PresenceEvent to Kafka on status changes
+    - Include username, status (online/offline), timestamp
+    - _Requirements: 2.1, 2.2_
+  - [ ] 10.5 Write unit tests for Presence Service
+    - Test online/offline status tracking
+    - Test TTL expiration
+    - Test concurrent connections for same user
+    - _Requirements: 2.1, 2.2, 2.3_
+
+- [ ] 11. Implement Router Worker
+  - [ ] 11.1 Create worker main loop
+    - Initialize Kafka consumer for message.events topic
+    - Implement consume loop with graceful shutdown
+    - Add error handling and retry logic
+    - Implement consumer group rebalancing
+    - _Requirements: 10.4_
+  - [ ] 11.2 Implement message event processing
+    - Process MessageEvent from Kafka
+    - Check message_id for deduplication against MongoDB
+    - Query Presence Service for recipient status
+    - Persist message to MongoDB with status SENT
+    - Route to appropriate delivery mechanism (internal or external)
+    - _Requirements: 4.1, 7.1, 7.2, 10.1, 10.3_
+  - [ ] 11.3 Implement internal message delivery
+    - For online recipients, push message via WebSocket
+    - Update message status to DELIVERED in MongoDB
+    - Publish StatusEvent to Kafka
+    - _Requirements: 7.1, 7.2, 6.1, 6.2_
+  - [ ] 11.4 Implement offline message handling
+    - For offline recipients, mark message for later delivery in MongoDB
+    - When user comes online, query pending messages
+    - Deliver pending messages in order by sequence_number
+    - _Requirements: 7.1, 7.2, 7.3, 10.2_
+  - [ ] 11.5 Implement external channel routing
+    - Parse channels array from message
+    - Query user-to-channel mappings from etcd
+    - Invoke appropriate Connector for each channel
+    - Handle connector responses and update status
+    - _Requirements: 4.3, 4.4, 14.1, 14.2, 14.3_
+  - [ ] 11.6 Implement retry logic with exponential backoff
+    - Add retry mechanism for failed connector calls
+    - Implement exponential backoff (1s, 2s, 4s, 8s)
+    - Max 5 retry attempts
+    - Send to DLQ after max retries
+    - _Requirements: 14.4, 14.5_
+  - [ ] 11.7 Write unit tests for Router Worker
+    - Test message deduplication logic
+    - Test online vs offline routing decision
+    - Test retry mechanism
+    - Test DLQ handling
+    - _Requirements: 7.1, 10.1, 10.3, 14.4_
+
+- [ ] 12. Implement Connector interface and base implementation
+  - [ ] 12.1 Define Connector interface
+    - Create Go interface with Connect, SendMessage, SendFile, HandleWebhook, Disconnect methods
+    - Define OutboundMessage and DeliveryResult structs
+    - _Requirements: 9.1, 9.2_
+  - [ ] 12.2 Implement base connector with circuit breaker
+    - Create BaseConnector struct with circuit breaker logic
+    - Implement circuit breaker states (CLOSED, OPEN, HALF_OPEN)
+    - Add failure counting and timeout logic
+    - _Requirements: 11.5, 14.4, 14.5_
+  - [ ] 12.3 Implement retry wrapper for connectors
+    - Create retry decorator for Connector interface
+    - Implement exponential backoff
+    - Add jitter to prevent thundering herd
+    - _Requirements: 14.4_
+
+- [ ] 13. Implement Telegram Connector
+  - [ ] 13.1 Create Telegram connector implementation
+    - Implement Connector interface for Telegram Bot API
+    - Add configuration for bot token
+    - Implement Connect method to validate token
+    - _Requirements: 9.2, 9.3_
+  - [ ] 13.2 Implement SendMessage for Telegram
+    - Translate OutboundMessage to Telegram API format
+    - Call Telegram sendMessage API
+    - Parse response and return DeliveryResult
+    - Handle rate limits and errors
+    - _Requirements: 9.2, 14.2_
+  - [ ] 13.3 Implement SendFile for Telegram
+    - Translate OutboundFile to Telegram API format
+    - Call Telegram sendDocument API
+    - Handle large files (Telegram limit is 50MB, chunk if needed)
+    - _Requirements: 9.2_
+  - [ ] 13.4 Implement webhook handler for Telegram
+    - Create HTTP endpoint to receive Telegram webhooks
+    - Parse delivery receipts and read receipts
+    - Publish StatusEvent to Kafka
+    - _Requirements: 9.2, 6.2_
+  - [ ] 13.5 Write integration tests for Telegram Connector
+    - Test message sending with mock Telegram API
+    - Test file sending
+    - Test webhook parsing
+    - _Requirements: 9.2, 14.2_
+
+- [ ] 14. Implement Mock Connectors (WhatsApp, Instagram, Messenger)
+  - [ ] 14.1 Create Mock WhatsApp Connector
+    - Implement Connector interface with simulated delays
+    - Log all operations for demonstration
+    - Return success with mock external_id
+    - _Requirements: 9.2, 14.2_
+  - [ ] 14.2 Create Mock Instagram Connector
+    - Implement Connector interface with simulated delays
+    - Log all operations for demonstration
+    - Return success with mock external_id
+    - _Requirements: 9.2, 14.2_
+  - [ ] 14.3 Create Mock Messenger Connector
+    - Implement Connector interface with simulated delays
+    - Log all operations for demonstration
+    - Return success with mock external_id
+    - _Requirements: 9.2, 14.2_
+
+- [ ] 15. Implement webhook delivery system
+  - [ ] 15.1 Create webhook delivery worker
+    - Consume StatusEvent from Kafka
+    - Query registered webhooks from etcd
+    - Format webhook payload with message_id and status
+    - Send HTTP POST to webhook URLs
+    - _Requirements: 6.5, 8.5_
+  - [ ] 15.2 Implement webhook retry logic
+    - Retry failed webhook deliveries with exponential backoff
+    - Max 3 retry attempts
+    - Log failed deliveries for monitoring
+    - _Requirements: 6.5_
+
+- [ ] 16. Implement observability infrastructure
+  - [ ] 16.1 Setup OpenTelemetry instrumentation
+    - Initialize OpenTelemetry SDK with Jaeger exporter
+    - Add tracing middleware to HTTP handlers
+    - Create spans for key operations (DB queries, Kafka publish, connector calls)
+    - Propagate trace context across services
+    - _Requirements: 13.2, 13.3_
+  - [ ] 16.2 Implement Prometheus metrics
+    - Create metrics for messages sent/delivered/failed
+    - Add latency histograms for API endpoints
+    - Create gauges for active connections
+    - Add connector-specific metrics (errors by channel)
+    - Expose /metrics endpoint
+    - _Requirements: 13.1, 13.4_
+  - [ ] 16.3 Implement structured logging
+    - Create logger wrapper with trace_id and message_id injection
+    - Use JSON format for logs
+    - Add log levels (ERROR, WARN, INFO, DEBUG)
+    - Ensure all services log consistently
+    - _Requirements: 13.3_
+  - [ ] 16.4 Create Grafana dashboards
+    - Import dashboard JSON for system overview
+    - Create performance dashboard with latency percentiles
+    - Create connectors dashboard with per-channel metrics
+    - _Requirements: 13.4_
+
+- [ ] 17. Implement API Gateway
+  - [ ] 17.1 Configure Nginx as API Gateway
+    - Create Nginx configuration for reverse proxy
+    - Setup TLS termination with self-signed cert (for dev)
+    - Configure upstream servers for Frontend, Auth, File services
+    - Add health check endpoints
+    - _Requirements: 8.1_
+  - [ ] 17.2 Implement rate limiting in Gateway
+    - Configure rate limiting per client_id (1000 req/min)
+    - Add rate limit headers in responses
+    - Return 429 when limit exceeded
+    - _Requirements: 8.1_
+  - [ ] 17.3 Add CORS configuration
+    - Configure allowed origins, methods, headers
+    - Add preflight request handling
+    - _Requirements: 8.1_
+
+- [ ] 18. Create deployment configurations
+  - [ ] 18.1 Create Kubernetes manifests
+    - Write Deployment manifests for all services
+    - Create Service manifests for internal communication
+    - Add ConfigMap for configuration
+    - Create Secret for sensitive data (tokens, passwords)
+    - _Requirements: 10.1, 10.2, 11.1, 11.2_
+  - [ ] 18.2 Configure resource requests and limits
+    - Set CPU and memory requests/limits for each service
+    - Configure HorizontalPodAutoscaler for Frontend and Router
+    - _Requirements: 10.1, 10.2, 10.5_
+  - [ ] 18.3 Setup health checks and probes
+    - Configure liveness, readiness, startup probes
+    - Set appropriate timeouts and thresholds
+    - _Requirements: 11.2_
+  - [ ] 18.4 Create PodDisruptionBudget
+    - Set minAvailable=2 for critical services
+    - Ensure high availability during updates
+    - _Requirements: 11.1, 11.2_
+
+- [ ] 19. Create Docker Compose for local development
+  - [ ] 19.1 Create docker-compose.yml
+    - Add services: Kafka, Zookeeper, MongoDB, Redis, MinIO, etcd
+    - Configure networking and volumes
+    - Add health checks for dependencies
+    - _Requirements: 10.1_
+  - [ ] 19.2 Add application services to compose
+    - Add Frontend, Auth, File, Router, Presence services
+    - Configure environment variables
+    - Setup depends_on for proper startup order
+    - _Requirements: 10.1_
+  - [ ] 19.3 Add observability stack to compose
+    - Add Prometheus, Grafana, Jaeger services
+    - Configure data sources and dashboards
+    - _Requirements: 13.1, 13.4_
+
+- [ ] 20. Create API documentation
+  - [ ] 20.1 Generate OpenAPI specification
+    - Write OpenAPI 3.0 spec for all endpoints
+    - Include request/response schemas
+    - Add authentication requirements
+    - Document error responses
+    - _Requirements: 8.2_
+  - [ ] 20.2 Setup Swagger UI
+    - Add Swagger UI container to docker-compose
+    - Serve OpenAPI spec at /api-docs
+    - _Requirements: 8.2_
+
+- [ ] 21. Implement load testing scenarios
+  - [ ] 21.1 Create k6 load test scripts
+    - Write script for sustained load (100k msgs/min)
+    - Create spike test script (0 → 200k msgs/min)
+    - Add file upload concurrency test
+    - _Requirements: 10.1_
+  - [ ] 21.2 Create test data generation utilities
+    - Generate realistic usernames and conversation data
+    - Create message payload generators
+    - Generate test files of various sizes
+    - _Requirements: 10.1_
+  - [ ] 21.3 Run load tests and collect results
+    - Execute load tests against deployed system
+    - Collect metrics (throughput, latency, errors)
+    - Generate performance report
+    - _Requirements: 10.1_
+
+- [ ] 22. Implement demo scenarios
+  - [ ] 22.1 Create demo script for basic chat
+    - Register 2 users
+    - Create conversation
+    - Send text messages
+    - Verify delivery and status updates
+    - _Requirements: 1.1, 3.1, 4.1, 6.1_
+  - [ ] 22.2 Create demo script for cross-platform messaging
+    - Register user with multiple channel mappings
+    - Send message to WhatsApp and Instagram
+    - Demonstrate connector invocation
+    - Show delivery status per channel
+    - _Requirements: 14.1, 14.2, 14.3_
+  - [ ] 22.3 Create demo script for file sharing
+    - Initiate file upload (100MB file)
+    - Complete upload with checksum
+    - Send file message
+    - Download file via presigned URL
+    - _Requirements: 5.1, 5.2, 5.3, 5.4_
+  - [ ] 22.4 Create demo script for offline message delivery
+    - Send messages to offline user
+    - Bring user online
+    - Verify pending messages delivered in order
+    - _Requirements: 7.1, 7.2, 7.3_
+
+- [ ] 23. Create monitoring and alerting rules
+  - [ ] 23.1 Define Prometheus alerting rules
+    - Create alert for high error rate (>5% for 5 min)
+    - Add alert for high latency (p95 >1s for 5 min)
+    - Create alert for Kafka consumer lag (>10k messages)
+    - Add alert for MongoDB replica set issues
+    - _Requirements: 13.4_
+  - [ ] 23.2 Configure Alertmanager
+    - Setup Alertmanager with routing rules
+    - Configure notification channels (email, Slack)
+    - Add alert grouping and throttling
+    - _Requirements: 13.4_
+
+- [ ] 24. Write operational documentation
+  - [ ] 24.1 Create deployment guide
+    - Document prerequisites (Kubernetes cluster, kubectl)
+    - Write step-by-step deployment instructions
+    - Add configuration options and environment variables
+    - _Requirements: 10.1_
+  - [ ] 24.2 Create runbook for common issues
+    - Document troubleshooting steps for service failures
+    - Add recovery procedures for data loss scenarios
+    - Include scaling procedures
+    - _Requirements: 11.1, 11.2_
+  - [ ] 24.3 Create API usage guide
+    - Write getting started guide for API consumers
+    - Add code examples in multiple languages
+    - Document authentication flow
+    - _Requirements: 8.1, 8.2_

@@ -1,0 +1,36 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'chat-platform'
+    environment: 'development'
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'frontend-service'
+    static_configs:
+      - targets: ['frontend:8080']
+    metrics_path: '/metrics'
+
+  - job_name: 'auth-service'
+    static_configs:
+      - targets: ['auth:8081']
+    metrics_path: '/metrics'
+
+  - job_name: 'file-service'
+    static_configs:
+      - targets: ['file-service:8082']
+    metrics_path: '/metrics'
+
+  - job_name: 'router-worker'
+    static_configs:
+      - targets: ['router-worker:8083']
+    metrics_path: '/metrics'
+
+  - job_name: 'presence-service'
+    static_configs:
+      - targets: ['presence:8084']
+    metrics_path: '/metrics'
